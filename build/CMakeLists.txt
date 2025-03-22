@@ -20,11 +20,11 @@ if(NOT xcmdline_POPULATED)
   if(NOT EXISTS "${xcmdline_SOURCE_DIR}/source/xcmdline_parser.h")
     message(FATAL_ERROR "Failed to download xcmdline or xcmdline_parser.h not found in ${xcmdline_SOURCE_DIR}")
   endif()
-  add_subdirectory("../dependency/xcmdline/build" "${CMAKE_CURRENT_BINARY_DIR}/xcmdline")
 endif()
 
 # Define xcmdline as an interface library only if not already defined
 if(NOT TARGET xcmdline)
+  add_subdirectory("../dependency/xcmdline/build" "${CMAKE_CURRENT_BINARY_DIR}/xcmdline")
   add_library(xcmdline INTERFACE)
   target_include_directories(xcmdline INTERFACE "${xcmdline_SOURCE_DIR}/source")
 endif()
