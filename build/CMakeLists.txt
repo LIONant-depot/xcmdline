@@ -13,7 +13,7 @@ FetchContent_Declare(
 )
 
 # Populate xcmdline only if not already populated
-FetchContent_GetProperties(xcmdline)
+FetchContent_MakeAvailable(xcmdline)
 if(NOT xcmdline_POPULATED)
   message(STATUS "Populating xcmdline for xundo...")
   FetchContent_Populate(xcmdline)
