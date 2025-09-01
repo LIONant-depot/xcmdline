@@ -9,13 +9,18 @@
 #include <cstdint>
 #include <variant>
 #include <string_view>
+#include "source/xerr.h"
 
 namespace xcmdline
 {
+    enum state : std::uint8_t
+    { OK
+    , FAILURE
+    };
+
     class parser
     {
     public:
-        struct error : std::string { error()=default; constexpr error(std::string&& X) noexcept : std::string(std::move(X)){} };
         struct handle       { int m_Value=-1; std::strong_ordering operator <=>(const handle&) const noexcept       = default; };
         struct group_handle { int m_Value=-1; std::strong_ordering operator <=>(const group_handle&) const noexcept = default; };
 
@@ -62,7 +67,7 @@ namespace xcmdline
         }
 
         // Parse command line arguments, returns empty string on success or error message
-        error Parse(int argc, const char* const argv[]) noexcept
+        xerr Parse(int argc, const char* const argv[]) noexcept
         {
             if (argc > 0) 
             {
@@ -85,9 +90,9 @@ namespace xcmdline
                         flag = flag.substr(1);
                     }
 
-                    if (auto E = findOption(flag); std::holds_alternative<error>(E))
+                    if (auto E = findOption(flag); std::holds_alternative<xerr>(E))
                     {
-                        return std::get<error>(E);
+                        return std::get<xerr>(E);
                     }
                     else
                     {
@@ -101,7 +106,8 @@ namespace xcmdline
 
                         if (args.size() < opt.m_minArgs)
                         {
-                            return std::format( "Option - {} requires at least {} arguments", flag, std::to_string(opt.m_minArgs) );
+                            xerr::LogMessage<state::FAILURE>(std::format("Option - {} requires at least {} arguments", flag, std::to_string(opt.m_minArgs)));
+                            return xerr::create_f<state, "Missing arguments">();
                         }
                     }
                 }
@@ -111,7 +117,8 @@ namespace xcmdline
             {
                 if (opt.m_isRequired && opt.m_Args.empty())
                 {
-                    return std::format( "Required option - {} is missing", opt.m_Name);
+                    xerr::LogMessage<state::FAILURE>(std::format("Required option - {} is missing", opt.m_Name));
+                    return xerr::create_f<state, "A required option is missing">();
                 }
             }
 
@@ -131,7 +138,7 @@ namespace xcmdline
         }
 
         // Parse command line arguments from a single string
-        error Parse(std::string_view commandLine) noexcept
+        xerr Parse(std::string_view commandLine) noexcept
         {
             std::vector<std::string>    args;
             constexpr std::string_view  delimiters = " \t";
@@ -174,12 +181,13 @@ namespace xcmdline
 
         // Get option argument by index with type conversion
         template<typename T>
-        std::variant<T, error> getOptionArgAs(handle hOption, size_t index = 0) const noexcept
+        std::variant<T, xerr> getOptionArgAs(handle hOption, size_t index = 0) const noexcept
         {
             const Option& opt = m_Options[hOption.m_Value];
             if (index >= opt.m_Args.size())
             {
-                return error(std::format("Option - {} does not have argument {}", opt.m_Name, index));
+                xerr::LogMessage<state::FAILURE>(std::format("Option - {} does not have argument {}", opt.m_Name, index));
+                return xerr::create_f<state, "Option is missing arguments">();
             }
 
             return convertValue<T>(opt.m_Args[index], opt.m_Name, index);
@@ -337,7 +345,7 @@ namespace xcmdline
         }
 
         // Find option by flag (linear search) hash key helps a bit...
-        std::variant<handle,error> findOption(std::string_view flag)
+        std::variant<handle,xerr> findOption(std::string_view flag)
         {
             std::size_t Key = std::hash<std::string_view>{}(flag);
 
@@ -351,11 +359,12 @@ namespace xcmdline
                 ++index;
             }
 
-            return std::format("Unknown option - {}", flag);
+            xerr::LogMessage<state::FAILURE>(std::format("Unknown option - {}", flag));
+            return xerr::create_f<state, "Unknown option">();
         }
 
         // const version of the find option function
-        std::variant<handle, error> findOption(std::string_view flag) const
+        std::variant<handle, xerr> findOption(std::string_view flag) const
         {
             return const_cast<parser*>(this)->findOption(flag);
         }
@@ -386,21 +395,24 @@ namespace xcmdline
         iss >> result;
         if (iss.fail() || !iss.eof()) 
         {
-            return std::variant<int64_t, error>{"Failed to convert '" + value + "' to integer at argument " + std::to_string(argIndex) + " of -" + std::string(flag)};
+            xerr::LogMessage<state::FAILURE>("Failed to convert '" + value + "' to integer at argument " + std::to_string(argIndex) + " of -" + std::string(flag) );
+            return std::variant<int64_t, xerr>{xerr::create_f<state, "conversion failure from string to float">()};
         }
-        return std::variant<int64_t, error>{result};
+        return std::variant<int64_t, xerr>{result};
     }
 
     template<>
-    auto parser::convertValue<double>(const std::string& value, std::string_view flag, size_t argIndex) const {
+    auto parser::convertValue<double>(const std::string& value, std::string_view flag, size_t argIndex) const
+    {
         std::istringstream iss(value);
         double result;
         iss >> result;
         if (iss.fail() || !iss.eof()) 
         {
-            return std::variant<double, error>{"Failed to convert '" + value + "' to double at argument " + std::to_string(argIndex) + " of -" + std::string(flag)};
+            xerr::LogMessage<state::FAILURE>("Failed to convert '" + value + "' to double at argument " + std::to_string(argIndex) + " of -" + std::string(flag));
+            return std::variant<double, xerr>{xerr::create_f<state,"conversion failure from string to double">()};
         }
-        return std::variant<double, error>{result};
+        return std::variant<double, xerr>{result};
     }
 
 } // namespace xcmdline

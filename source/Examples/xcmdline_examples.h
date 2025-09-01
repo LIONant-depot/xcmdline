@@ -7,7 +7,7 @@
 namespace xcmdline
 {
     inline
-        int Example(void)
+    int Example(void)
     {
         const char* argv[] =
         { "ProgramExample"
