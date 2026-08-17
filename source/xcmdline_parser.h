@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <variant>
 #include <string_view>
+#include <cctype>
 #include "source/xerr.h"
 
 namespace xcmdline
@@ -316,23 +317,33 @@ namespace xcmdline
         std::vector<groups>         m_Groups;          // All groups and their options
         std::string                 m_programName;     // Name of the program
 
-        // Helper function to check if a string is a flag
+        // Helper function to check if a string is a flag - a leading '-' alone isn't enough: a bare
+        // "-" (used as an "empty value" placeholder by some callers) and a negative number like "-1"
+        // both start with '-' too but are values, not flag names.
         bool isFlag(std::string_view arg) const
         {
-            return !arg.empty() && (arg[0] == '-' || arg.substr(0, 2) == "--");
+            if (arg.empty() || arg[0] != '-' || arg.size() == 1) return false;
+            if (std::isdigit(static_cast<unsigned char>(arg[1]))) return false;
+            return true;
         }
 
         // Parse a single quoted or unquoted argument
         std::string parseArgument(std::string_view arg, int& i, int argc, const char* const argv[])
         {
-            if (arg.front() == '"' && arg.back() != '"') 
+            // A quoted value with no internal space/tab is already a single token here (e.g. "C:\a\b")
+            // - front() and back() are BOTH '"' in the same token, so this must be checked before the
+            // "spans multiple tokens" case below, or the surrounding quote characters never get
+            // stripped and end up as literal characters in the returned value.
+            if (arg.size() >= 2 && arg.front() == '"' && arg.back() == '"')
+                return std::string(arg.substr(1, arg.size() - 2));
+            if (arg.front() == '"' && arg.back() != '"')
             {
                 std::ostringstream oss;
                 oss << arg.substr(1);
-                while (i + 1 < argc) 
+                while (i + 1 < argc)
                 {
                     std::string_view nextArg = argv[++i];
-                    if (nextArg.back() == '"') 
+                    if (nextArg.back() == '"')
                     {
                         oss << " " << nextArg.substr(0, nextArg.length() - 1);
                         break;
