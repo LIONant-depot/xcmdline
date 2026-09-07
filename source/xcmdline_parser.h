@@ -385,26 +385,32 @@ namespace xcmdline
         auto convertValue(const std::string& value, std::string_view flag, size_t argIndex) const;
     };
 
-    // Template specializations for type conversion
+    // Template specializations for type conversion - inline on every one: an EXPLICIT (full)
+    // specialization of a function template is an ordinary function by the time it's instantiated,
+    // not automatically inline/weak-linkage the way an implicitly-instantiated template is, so
+    // without this keyword a header defining these has external linkage and violates ODR the moment
+    // more than one .cpp in the same link includes it. Confirmed live: harmless while only one
+    // xGPU example used xundo (which pulls this header in transitively), a real multiply-defined-
+    // symbol link error the moment a second one (E29) did too.
     template<>
-    auto parser::convertValue<std::string>(const std::string& value, std::string_view flag, size_t argIndex) const
+    inline auto parser::convertValue<std::string>(const std::string& value, std::string_view flag, size_t argIndex) const
     {
         return value;
     }
 
     template<>
-    auto parser::convertValue<std::string_view>(const std::string& value, std::string_view flag, size_t argIndex) const
+    inline auto parser::convertValue<std::string_view>(const std::string& value, std::string_view flag, size_t argIndex) const
     {
         return std::string_view(value);
     }
 
     template<>
-    auto parser::convertValue<int64_t>(const std::string& value, std::string_view flag, size_t argIndex) const
+    inline auto parser::convertValue<int64_t>(const std::string& value, std::string_view flag, size_t argIndex) const
     {
         std::istringstream iss(value);
         int64_t result;
         iss >> result;
-        if (iss.fail() || !iss.eof()) 
+        if (iss.fail() || !iss.eof())
         {
             xerr::LogMessage<state::FAILURE>("Failed to convert '" + value + "' to integer at argument " + std::to_string(argIndex) + " of -" + std::string(flag) );
             return std::variant<int64_t, xerr>{xerr::create_f<state, "conversion failure from string to float">()};
@@ -413,12 +419,12 @@ namespace xcmdline
     }
 
     template<>
-    auto parser::convertValue<double>(const std::string& value, std::string_view flag, size_t argIndex) const
+    inline auto parser::convertValue<double>(const std::string& value, std::string_view flag, size_t argIndex) const
     {
         std::istringstream iss(value);
         double result;
         iss >> result;
-        if (iss.fail() || !iss.eof()) 
+        if (iss.fail() || !iss.eof())
         {
             xerr::LogMessage<state::FAILURE>("Failed to convert '" + value + "' to double at argument " + std::to_string(argIndex) + " of -" + std::string(flag));
             return std::variant<double, xerr>{xerr::create_f<state,"conversion failure from string to double">()};
