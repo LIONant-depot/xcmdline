@@ -116,6 +116,24 @@ namespace xcmdline
             return Out;
         }
 
+        // The other way: any text as ONE value of a command line (what Tokenize reads back as exactly this text). Always in quotes, so it may hold spaces, tabs, line breaks, a
+        // leading '-' or nothing at all; a quote is written \" and the backslashes in front of a quote or of the closing quote are doubled.
+        static std::string Quote(std::string_view Text) noexcept
+        {
+            std::string Out = "\"";
+            std::size_t nBackslashes = 0;
+            for (const char c : Text)
+            {
+                if (c == '\\') { ++nBackslashes; continue; }
+                if (c == '"') { Out.append(nBackslashes * 2 + 1, '\\'); Out += '"'; }
+                else          { Out.append(nBackslashes, '\\'); Out += c; }
+                nBackslashes = 0;
+            }
+            Out.append(nBackslashes * 2, '\\');
+            Out += '"';
+            return Out;
+        }
+
         // Parse command line arguments, returns empty string on success or error message
         xerr Parse(int argc, const char* const argv[]) noexcept
         {
