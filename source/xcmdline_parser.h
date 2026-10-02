@@ -67,54 +67,112 @@ namespace xcmdline
             return OptHandle;
         }
 
+        // One word of a command line. A quoted word was written with quotes ("-5", "-Name"): whatever is inside is a value, never a flag.
+        struct token { std::string m_Text; bool m_bQuoted = false; };
+
+        // Splits a command line the way Windows does (CommandLineToArgvW), so that a person, a script and the OS agree and a path needs no care:
+        //   - words are separated by spaces, tabs and line breaks, except inside "quotes", where all of them are kept as they are;
+        //   - a backslash is just a backslash, unless it comes right before a quote: 2n backslashes + a quote = n backslashes and the quote opens or closes;
+        //     2n+1 backslashes + a quote = n backslashes and a literal quote ("C:\dir\" is C:\dir\ ; say \" for a quote inside a value);
+        //   - inside quotes, "" is a literal quote;
+        //   - "" on its own is an empty value.
+        // pUnterminated tells that the line ended inside a quote (a pipe waits for the rest of it: a value may hold line breaks).
+        static std::vector<token> Tokenize(std::string_view Line, bool* pUnterminated = nullptr) noexcept
+        {
+            std::vector<token> Out;
+            std::string        Cur;
+            bool               bIn = false, bHave = false, bQuoted = false;
+            for (std::size_t i = 0; i < Line.size(); ++i)
+            {
+                const char c = Line[i];
+                if (c == '\\')
+                {
+                    std::size_t n = 0;
+                    while (i < Line.size() && Line[i] == '\\') { ++n; ++i; }
+                    if (i < Line.size() && Line[i] == '"')
+                    {
+                        Cur.append(n / 2, '\\');
+                        if (n % 2) Cur += '"'; else --i;                 // an even run leaves the quote for the next turn, where it opens or closes
+                    }
+                    else { Cur.append(n, '\\'); --i; }
+                    bHave = true;
+                    continue;
+                }
+                if (c == '"')
+                {
+                    if (bIn && i + 1 < Line.size() && Line[i + 1] == '"') { Cur += '"'; ++i; bHave = true; continue; }
+                    bIn = !bIn; bHave = true; bQuoted = true;
+                    continue;
+                }
+                if (!bIn && (c == ' ' || c == '\t' || c == '\r' || c == '\n'))
+                {
+                    if (bHave) { Out.push_back({ std::move(Cur), bQuoted }); Cur.clear(); bHave = bQuoted = false; }
+                    continue;
+                }
+                Cur += c; bHave = true;
+            }
+            if (bHave) Out.push_back({ std::move(Cur), bQuoted });
+            if (pUnterminated) *pUnterminated = bIn;
+            return Out;
+        }
+
         // Parse command line arguments, returns empty string on success or error message
         xerr Parse(int argc, const char* const argv[]) noexcept
         {
-            if (argc > 0) 
+            if (argc > 0)
             {
                 m_programName = argv[0];
             }
 
-            for (int i = 1; i < argc; ++i) 
+            // The words of a real argv were already split at the spaces by whoever built it: a quoted value that held spaces is put back together here
+            std::vector<token> Tokens;
+            for (int i = 1; i < argc; ++i)
             {
-                std::string_view arg = argv[i];
-
-                if (isFlag(arg)) 
+                const std::string_view arg = argv[i];
+                if (arg.size() >= 2 && arg.front() == '"' && arg.back() == '"') { Tokens.push_back({ std::string(arg.substr(1, arg.size() - 2)), true }); continue; }
+                if (!arg.empty() && arg.front() == '"')
                 {
-                    std::string flag = std::string(arg);
-                    if (flag.substr(0, 2) == "--") 
+                    std::string Joined(arg.substr(1));
+                    while (i + 1 < argc)
                     {
-                        flag = flag.substr(2);
+                        std::string_view next = argv[++i];
+                        if (!next.empty() && next.back() == '"') { Joined += ' '; Joined.append(next.substr(0, next.size() - 1)); break; }
+                        Joined += ' '; Joined.append(next);
                     }
-                    else 
-                    {
-                        flag = flag.substr(1);
-                    }
+                    Tokens.push_back({ std::move(Joined), true });
+                    continue;
+                }
+                Tokens.push_back({ std::string(arg), false });
+            }
+            return ParseTokens(Tokens);
+        }
 
-                    if (auto E = findOption(flag); std::holds_alternative<xerr>(E))
-                    {
-                        return std::get<xerr>(E);
-                    }
-                    else
-                    {
-                        const Option& opt = m_Options[std::get<handle>(E).m_Value];
+        xerr ParseTokens(const std::vector<token>& Tokens) noexcept
+        {
+            const auto IsFlagToken = [&](const token& T) { return !T.m_bQuoted && isFlag(T.m_Text); };
+            for (std::size_t i = 0; i < Tokens.size(); ++i)
+            {
+                if (!IsFlagToken(Tokens[i])) continue;
+                std::string flag = Tokens[i].m_Text;
+                flag = flag.substr(flag.substr(0, 2) == "--" ? 2 : 1);
 
-                        std::vector<std::string>& args = opt.m_Args;
-                        while (i + 1 < argc && !isFlag(argv[i + 1])) 
-                        {
-                            args.push_back(parseArgument(argv[++i], i, argc, argv));
-                        }
+                const auto E = findOption(flag);
+                if (std::holds_alternative<xerr>(E))
+                {
+                    return std::get<xerr>(E);
+                }
+                const Option& opt = m_Options[std::get<handle>(E).m_Value];
+                std::vector<std::string>& args = opt.m_Args;
+                while (i + 1 < Tokens.size() && !IsFlagToken(Tokens[i + 1])) args.push_back(Tokens[++i].m_Text);
 
-                        if (args.size() < opt.m_minArgs)
-                        {
-                            xerr::LogMessage<state::FAILURE>(std::format("Option - {} requires at least {} arguments", flag, std::to_string(opt.m_minArgs)));
-                            return xerr::create_f<state, "Missing arguments">();
-                        }
-                    }
+                if (args.size() < opt.m_minArgs)
+                {
+                    xerr::LogMessage<state::FAILURE>(std::format("Option - {} requires at least {} arguments", flag, std::to_string(opt.m_minArgs)));
+                    return xerr::create_f<state, "Missing arguments">();
                 }
             }
 
-            for (const auto& opt : m_Options) 
+            for (const auto& opt : m_Options)
             {
                 if (opt.m_isRequired && opt.m_Args.empty())
                 {
@@ -138,32 +196,10 @@ namespace xcmdline
             for (auto& E : m_Options) E.m_Args.clear();
         }
 
-        // Parse command line arguments from a single string
+        // Parse command line arguments from a single string (see Tokenize for the rules: quotes, backslashes, line breaks inside a quoted value)
         xerr Parse(std::string_view commandLine) noexcept
         {
-            std::vector<std::string>    args;
-            constexpr std::string_view  delimiters = " \t";
-
-            size_t start = commandLine.find_first_not_of(delimiters);
-
-            while (start != std::string_view::npos) 
-            {
-                size_t end = commandLine.find_first_of(delimiters, start);
-                if (end == std::string_view::npos) 
-                {
-                    end = commandLine.length();
-                }
-                args.emplace_back(commandLine.substr(start, end - start));
-                start = commandLine.find_first_not_of(delimiters, end);
-            }
-
-            std::vector<const char*> c_args;
-            for (const auto& arg : args) 
-            {
-                c_args.push_back(arg.c_str());
-            }
-
-            return Parse(static_cast<int>(c_args.size()), c_args.data());
+            return ParseTokens(Tokenize(commandLine));
         }
 
         // Check if an option exists
