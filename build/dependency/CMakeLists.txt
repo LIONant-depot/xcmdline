@@ -6,5 +6,5 @@ FetchAndPopulate("https://github.com/LIONant-depot/xerr.git"    "main")
 
 DefineInterfaceComponent(xcmdline "dependencies/xcore"
   "source/xcmdline_parser.h"
-  "readme.md"
+  "README.md"
 )
