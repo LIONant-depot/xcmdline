@@ -23,7 +23,7 @@ namespace xcmdline
     {
     public:
         struct handle       { int m_Value=-1; std::strong_ordering operator <=>(const handle&) const noexcept       = default; };
-        struct group_handle { int m_Value=-1; std::strong_ordering operator <=>(const group_handle&) const noexcept = default; };
+        struct group_handle { constexpr group_handle(int V = -1) noexcept : m_Value(V) {} int m_Value; std::strong_ordering operator <=>(const group_handle&) const noexcept = default; };
 
         parser() = default;
 
