@@ -180,6 +180,7 @@ namespace xcmdline
                     return std::get<xerr>(E);
                 }
                 const Option& opt = m_Options[std::get<handle>(E).m_Value];
+                opt.m_bGiven = true;
                 std::vector<std::string>& args = opt.m_Args;
                 while (i + 1 < Tokens.size() && !IsFlagToken(Tokens[i + 1])) args.push_back(Tokens[++i].m_Text);
 
@@ -211,7 +212,7 @@ namespace xcmdline
 
         void clearArgs()
         {
-            for (auto& E : m_Options) E.m_Args.clear();
+            for (auto& E : m_Options) { E.m_Args.clear(); E.m_bGiven = false; }
         }
 
         // Parse command line arguments from a single string (see Tokenize for the rules: quotes, backslashes, line breaks inside a quoted value)
@@ -223,8 +224,9 @@ namespace xcmdline
         // Check if an option exists
         bool hasOption(handle hOption) const noexcept
         {
+            // given (a flag without arguments counts: "-Stats"), or arguments it got
             const Option& opt = m_Options[hOption.m_Value];
-            return !opt.m_Args.empty();
+            return opt.m_bGiven || !opt.m_Args.empty();
         }
 
         // Get number of arguments for an option
@@ -356,6 +358,7 @@ namespace xcmdline
             bool                                m_isRequired;
             size_t                              m_minArgs;
             mutable std::vector<std::string>    m_Args;
+            mutable bool                        m_bGiven = false;       // on the command line, with or without arguments (a flag: "-Stats")
         };
 
         struct groups
